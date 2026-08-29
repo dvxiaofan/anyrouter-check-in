@@ -5,10 +5,15 @@ on:
   workflow_dispatch:
     inputs:
       debug:
-        description: 开启调试模式（截图 artifact、详细日志）
+        description: 开启调试模式（截图 artifact、详细日志）— public 仓库慎用，见下方注释
         required: false
         default: false
         type: boolean
+
+# 最小权限：checkout 需要 contents:read，此外什么都不需要。
+# 单个 job 若需更多权限，在该 job 内单独声明（见 keepalive）。
+permissions:
+  contents: read
 
 jobs:
   checkin:
@@ -19,18 +24,18 @@ jobs:
       PYTHONUNBUFFERED: 1
       DEBUG_MODE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug == 'true' && 'true' || 'false' }}
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
 
-    - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+    - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
       with:
         version: "latest"
 
-    - uses: actions/setup-python@v6
+    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
       with:
         python-version: '3.11'
 
     - name: 缓存 UV 依赖
-      uses: actions/cache@v5
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5
       id: uv-cache
       with:
         path: ~/.cache/uv
@@ -43,6 +48,8 @@ jobs:
         uv sync --frozen
         echo "✅ 环境初始化完成"
 
+    # xvfb + 字体：session cookie 模式下其实走不到（checkin.py 取 WAF cookie 时硬编码
+    # headless=True），保留是为了 cookie 失效时能临时切回 email/password 登录顶一下。
     - name: 安装系统依赖
       run: |
         sudo apt-get update
@@ -50,7 +57,7 @@ jobs:
           fonts-ipafont-gothic fonts-wqy-zenhei fonts-tlwg-loma-otf
 
     - name: 缓存 CloakBrowser 二进制
-      uses: actions/cache@v5
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5
       id: cloakbrowser-cache
       with:
         path: ~/.cloakbrowser
@@ -64,7 +71,7 @@ jobs:
         echo "✅ CloakBrowser 安装完成"
 
     - name: 恢复余额历史缓存
-      uses: actions/cache@v5
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5
       with:
         path: balance_hash.txt
         key: balance-hash-${{ github.ref_name }}-${{ github.run_id }}
@@ -73,20 +80,12 @@ jobs:
           balance-hash-
 
     - name: 恢复浏览器 Profile 缓存
-      uses: actions/cache@v5
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5
       with:
         path: .browser_profiles
         key: browser-profiles-${{ runner.os }}-v1
         restore-keys: |
           browser-profiles-${{ runner.os }}-
-
-    - name: 配置代理
-      env:
-        PROXY_SUBSCRIPTION_URL: ${{ secrets.PROXY_SUBSCRIPTION_URL }}
-        PROXY_TEST_URL: https://www.google.com/generate_204
-        MIHOMO_VERSION: v1.19.27
-        PROXY_REQUIRED: false
-      run: bash scripts/setup_mihomo_proxy.sh
 
     - name: 执行签到
       env:
@@ -116,22 +115,19 @@ jobs:
       run: |
         xvfb-run -a --server-args="-screen 0 1920x1080x24" uv run checkin.py
 
+    # 🔴 本仓库是 public：这个 artifact 任何人都能下载，而截图是 full_page 的
+    #    「已登录 console 页」（含邮箱、用户 ID、余额，可能还有 API Key）。
+    #    只在手动 dispatch 且勾选 debug 时才产生，保留期已从 14 天压到 1 天。
+    #    调试请优先在本地跑：截图落 checkin_screenshots/，已被 .gitignore 覆盖。
     - name: 上传调试截图
       if: always() && env.DEBUG_MODE == 'true'
-      env:
-        HTTP_PROXY: ''
-        HTTPS_PROXY: ''
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
       with:
         name: checkin-screenshots-${{ github.run_id }}
         path: checkin_screenshots/
         if-no-files-found: warn
         include-hidden-files: true
-        retention-days: 14
-
-    - name: 停止代理
-      if: always()
-      run: bash scripts/stop_mihomo_proxy.sh
+        retention-days: 1
 
     - name: 执行结果
       if: always()
@@ -142,3 +138,20 @@ jobs:
           echo "调试截图已上传为 artifact: checkin-screenshots-${{ github.run_id }}"
           ls -la checkin_screenshots/
         fi
+
+  # public 仓库若 60 天无活动，GitHub 会自动停掉 scheduled workflow 且不通知。
+  # 本仓库刻意冻结不同步上游，必然会踩到这条规则，所以每次定时运行都抢先
+  # 调 API 把自己重新 enable 一次。相比推空 commit：不污染提交历史、不需要
+  # contents:write、不引入第三方 action。
+  keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write        # 仅本 job；checkin job 仍是 contents:read
+    steps:
+    - name: 抢先重新启用本 workflow
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh api -X PUT "repos/${{ github.repository }}/actions/workflows/checkin.yml/enable" \
+          && echo "✅ keepalive: workflow 已确认为启用状态"
