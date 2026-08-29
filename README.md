@@ -15,9 +15,9 @@ Fork 自 [millylee/anyrouter-check-in](https://github.com/millylee/anyrouter-che
    要调试就在本地跑，截图落 `checkin_screenshots/`，已被 `.gitignore` 覆盖。
 
 2. **必须至少配一个通知渠道。**
-   `utils/notify.py` 的 `push_message` 对每个未配置的渠道是**静默 return**，
-   外层还照打 `Message push successful!`。一个都不配 = session 失效时你既收不到告警，
-   日志里还是一片"推送成功"的假象。
+   一个都不配时，运行日志会明确列出 `[Bark]: Message push failed! Reason: Bark Key not configured`
+   （`utils/notify.py` 里未配置的渠道会 `raise`，不是静默跳过），但**你收不到任何推送**——
+   session 失效时得自己想起来去翻 Actions 页才会发现。配一个就能被动收告警。
 
 3. **不主动升 `cloakbrowser`。** 见下方「冻结策略」。
 
@@ -79,6 +79,25 @@ EOF
 uv run checkin.py
 uv run pytest tests/
 ```
+
+### ⚠️ 国内本地跑必须处理代理（2026-08-29 实测）
+
+从境内直连 `anyrouter.top` **TLS 握手会失败**（curl exit 35）。但 CloakBrowser 能直连成功
+（Chromium 支持 ECH，可绕开基于 SNI 的阻断），所以表现是「拿到了 WAF cookie，
+但后续 httpx 请求全挂」，很有迷惑性。
+
+同时 httpx 默认 `trust_env=True` 会捡走 `all_proxy`。如果你的 shell profile 里
+`all_proxy=socks5://...`，会报 `Using SOCKS proxy, but the 'socksio' package is not installed`。
+
+正确跑法——清掉 socks、保留 HTTP 代理：
+
+```bash
+env -u ALL_PROXY -u all_proxy \
+    HTTP_PROXY=http://127.0.0.1:7893 HTTPS_PROXY=http://127.0.0.1:7893 \
+    uv run checkin.py
+```
+
+GitHub runner 在境外且不带这些环境变量，**不受此影响**，无需任何代理配置。
 
 本地开 `DEBUG_MODE=true` 是安全的——截图只落在本机且已 gitignore。
 
