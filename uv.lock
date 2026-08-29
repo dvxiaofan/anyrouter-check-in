@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 
 [[package]]
@@ -41,7 +41,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cloakbrowser", specifier = ">=0.3.0" },
+    { name = "cloakbrowser", specifier = "==0.3.31" },
     { name = "httpx", extras = ["http2"], specifier = ">=0.24.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
 ]
