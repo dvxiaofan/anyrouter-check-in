@@ -65,11 +65,22 @@ def read_accounts_raw() -> str:
 
 
 def session_lifetime(session: str) -> tuple[datetime, int] | None:
-	"""解析 gorilla/sessions 的签发时间戳，返回 (签发时间, 剩余天数)。"""
+	"""解析 gorilla/sessions 的签发时间戳，返回 (签发时间, 剩余天数)。
+
+	只解码前 16 个字符即可拿到「时间戳|」前缀——整串解码不可靠：gorilla 用的是
+	URL-safe base64，HMAC 段可能含 `-` / `_`，标准 b64decode 会因丢弃这些字符
+	导致长度不是 4 的倍数而报错。
+	"""
 	try:
-		parts = base64.b64decode(session).split(b'|')
-		issued = datetime.fromtimestamp(int(parts[0]))
+		head = base64.urlsafe_b64decode(session[:16]).decode('latin1')
 	except Exception:
+		return None
+	m = re.match(r'(\d{9,11})\|', head)
+	if not m:
+		return None
+	try:
+		issued = datetime.fromtimestamp(int(m.group(1)))
+	except (ValueError, OSError, OverflowError):
 		return None
 	expires = issued + timedelta(days=ASSUMED_VALID_DAYS)
 	return issued, (expires - datetime.now()).days
