@@ -127,12 +127,16 @@ uv run scripts/accounts.py check && uv run scripts/accounts.py remote-status && 
 | 日志现象 | 含义 | 处理 |
 |---|---|---|
 | `HTTP 401` | session 过期 | 换 cookie，走「每月轮换」流程 |
-| `Missing WAF cookies` | 过不了 WAF（IP 信誉或 cloakbrowser 指纹过时） | 先本地跑对比；本地成功=远端 IP 问题；都失败=考虑升 cloakbrowser（须本地实测） |
+| **本地** `HTTP 403` + `server: ESA` | **不是真故障**：WAF 把 `acw_sc__v2` 绑定到取它时的客户端 IP。浏览器和 httpx 走了不同出口（Clash 切节点），IP 对不上 | **别据此判断账号有问题**。线上 runner 单一 IP 无代理不会有这问题——直接看线上 `runs` 结果为准 |
+| `Missing WAF cookies` | 过不了 WAF（IP 信誉或 cloakbrowser 指纹过时） | 先看线上是否也失败；只有线上也挂才考虑升 cloakbrowser（须实测） |
 | `Error 1040 (08004)` | anyrouter 官方数据库连接数打满 | 等下一轮，不用管 |
 | `Using SOCKS proxy... socksio` | 本地 `all_proxy` 是 socks5 | 见上方本地实跑命令 |
 | `SSLV3_ALERT_HANDSHAKE_FAILURE` | 本地直连被阻断 | 挂 HTTP 代理 |
-| `Message push failed! Reason: X not configured` | 该通知渠道没配 | 正常现象；至少配一个渠道即可 |
 | 「今日已签到，无变化」 | 24h 内已签过 | 正常，anyrouter 是滚动 24h 不是零点重置 |
+
+> **本地验证的可信度有限**：受代理出口 IP 影响，本地 403/成功都不能直接推断线上。
+> 想确认线上状态，用 `accounts.py runs` 看真实运行结果，或
+> `gh workflow run checkin.yml --repo dvxiaofan/anyrouter-check-in` 触发一次。
 
 ## 通知渠道
 
@@ -140,8 +144,17 @@ uv run scripts/accounts.py check && uv run scripts/accounts.py remote-status && 
 Server酱 / Gotify / SMTP 邮件。未配置的会 `raise` 并在日志明确写
 `Message push failed! Reason: X not configured`（**不是**静默跳过）。
 
-**至少配一个**——否则 cookie 失效时收不到推送，只能自己想起来去翻 Actions 页。
-在 GitHub Environment `production` 里加对应 secret 即可，脚本会自动跳过没配的。
+**当前已配 Telegram**（bot `@cc_any_bot`，secret `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`）。
+`checkin.yml` 里只保留了 Telegram 两个 env——未配置的渠道每轮都会打一行
+「Message push failed」把真正的失败淹掉，所以不用的渠道不要留在 workflow 里。
+
+要换/加渠道：在 GitHub Environment `production` 加对应 secret，**并且**在
+`checkin.yml` 的「执行签到」步骤 env 里补上同名条目，两边都要动。
+
+新配 Telegram 机器人时，`TELEGRAM_CHAT_ID` 只能从「用户已给该 bot 发过消息」
+的记录里取：让用户先给 bot 发 `/start`，再
+`curl -x http://127.0.0.1:7893 "https://api.telegram.org/bot<TOKEN>/getUpdates"`
+从 `result[].message.chat.id` 读。
 
 ## 架构要点（排查时有用）
 
