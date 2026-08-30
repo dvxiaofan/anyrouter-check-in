@@ -70,15 +70,6 @@ jobs:
         uv run python -m cloakbrowser install
         echo "✅ CloakBrowser 安装完成"
 
-    - name: 恢复余额历史缓存
-      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5
-      with:
-        path: balance_hash.txt
-        key: balance-hash-${{ github.ref_name }}-${{ github.run_id }}
-        restore-keys: |
-          balance-hash-${{ github.ref_name }}-
-          balance-hash-
-
     - name: 恢复浏览器 Profile 缓存
       uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25  # v5
       with:

@@ -4,7 +4,6 @@ AnyRouter.top 自动签到脚本
 """
 
 import asyncio
-import hashlib
 import json
 import os
 import sys
@@ -39,37 +38,6 @@ from utils.notify import notify
 from utils.proxy import get_playwright_proxy, get_proxy_server
 
 load_dotenv()
-
-BALANCE_HASH_FILE = 'balance_hash.txt'
-
-
-def load_balance_hash():
-	"""加载余额hash"""
-	try:
-		if os.path.exists(BALANCE_HASH_FILE):
-			with open(BALANCE_HASH_FILE, 'r', encoding='utf-8') as f:
-				return f.read().strip()
-	except Exception:  # nosec B110
-		pass
-	return None
-
-
-def save_balance_hash(balance_hash):
-	"""保存余额hash"""
-	try:
-		with open(BALANCE_HASH_FILE, 'w', encoding='utf-8') as f:
-			f.write(balance_hash)
-	except Exception as e:
-		print(f'Warning: Failed to save balance hash: {e}')
-
-
-def generate_balance_hash(balances):
-	"""生成余额数据的hash"""
-	simple_balances = (
-		{k: {'quota': v.get('quota'), 'used': v.get('used')} for k, v in balances.items()} if balances else {}
-	)
-	balance_json = json.dumps(simple_balances, sort_keys=True, separators=(',', ':'))
-	return hashlib.sha256(balance_json.encode('utf-8')).hexdigest()[:16]
 
 
 def parse_cookies(cookies_data):
@@ -503,137 +471,95 @@ async def main():
 
 	print(f'[INFO] Found {len(accounts)} account configurations')
 
-	last_balance_hash = load_balance_hash()
-
 	success_count = 0
 	total_count = len(accounts)
 	notification_content = []
-	current_balances = {}
-	account_check_in_details = {}
-	need_notify = False
-	balance_changed = False
 
 	for i, account in enumerate(accounts):
-		account_key = f'account_{i + 1}'
+		account_name = account.get_display_name(i)
 		try:
 			success, user_info_before, user_info_after = await check_in_account(account, i, app_config)
 			if success:
 				success_count += 1
 
-			should_notify_this_account = False
-
+			# 每个账号无条件进通知：签到失败 → [FAIL]；余额查询失败 → 明确标注
 			if not success:
-				should_notify_this_account = True
-				need_notify = True
-				account_name = account.get_display_name(i)
-				print(f'[NOTIFY] {account_name} failed, will send notification')
-
-			if user_info_after and user_info_after.get('success'):
-				current_quota = user_info_after['quota']
-				current_used = user_info_after['used_quota']
-				current_balances[account_key] = {'quota': current_quota, 'used': current_used}
-
-				if user_info_before and user_info_before.get('success'):
-					before_quota = user_info_before['quota']
-					before_used = user_info_before['used_quota']
-					after_quota = user_info_after['quota']
-					after_used = user_info_after['used_quota']
-
-					total_before = before_quota + before_used
-					total_after = after_quota + after_used
-
-					check_in_reward = total_after - total_before
-					usage_increase = after_used - before_used
-					balance_change = after_quota - before_quota
-
-					account_check_in_details[account_key] = {
-						'name': account.get_display_name(i),
-						'before_quota': before_quota,
-						'before_used': before_used,
-						'after_quota': after_quota,
-						'after_used': after_used,
-						'check_in_reward': check_in_reward,
-						'usage_increase': usage_increase,
-						'balance_change': balance_change,
-						'success': success,
-					}
-
-			if should_notify_this_account:
-				account_name = account.get_display_name(i)
-				status = '[SUCCESS]' if success else '[FAIL]'
-				account_result = f'{status} {account_name}'
+				account_result = f'[FAIL] {account_name}'
 				if user_info_after and user_info_after.get('success'):
 					account_result += f'\n{user_info_after["display"]}'
 				elif user_info_after:
 					account_result += f'\n{user_info_after.get("error", "Unknown error")}'
 				notification_content.append(account_result)
+				continue
+
+			if user_info_before and user_info_before.get('success') and user_info_after and user_info_after.get('success'):
+				before_quota = user_info_before['quota']
+				before_used = user_info_before['used_quota']
+				after_quota = user_info_after['quota']
+				after_used = user_info_after['used_quota']
+
+				total_before = before_quota + before_used
+				total_after = after_quota + after_used
+
+				check_in_reward = total_after - total_before
+				usage_increase = after_used - before_used
+				balance_change = after_quota - before_quota
+
+				detail = {
+					'name': account_name,
+					'before_quota': before_quota,
+					'before_used': before_used,
+					'after_quota': after_quota,
+					'after_used': after_used,
+					'check_in_reward': check_in_reward,
+					'usage_increase': usage_increase,
+					'balance_change': balance_change,
+					'success': success,
+				}
+				notification_content.append(format_check_in_notification(detail))
+			else:
+				notification_content.append(
+					f'[CHECK-IN] {account_name}\n'
+					'  ━━━━━━━━━━━━━━━━━━━━\n'
+					'  签到成功，但余额查询失败'
+				)
 
 		except Exception as e:
-			account_name = account.get_display_name(i)
 			print(f'[FAILED] {account_name} processing exception: {e}')
-			need_notify = True
 			notification_content.append(f'[FAIL] {account_name} exception: {str(e)[:50]}...')
 
-	current_balance_hash = generate_balance_hash(current_balances) if current_balances else None
-	if current_balance_hash:
-		if last_balance_hash is None:
-			balance_changed = True
-			need_notify = True
-			print('[NOTIFY] First run detected, will send notification with current balances')
-		elif current_balance_hash != last_balance_hash:
-			balance_changed = True
-			need_notify = True
-			print('[NOTIFY] Balance changes detected, will send notification')
-		else:
-			print('[INFO] No balance changes detected')
+	# 每次运行都发送全量通知（无论成功失败、余额查询是否成功）
+	summary = [
+		'[STATS] Check-in result statistics:',
+		f'[SUCCESS] Success: {success_count}/{total_count}',
+		f'[FAIL] Failed: {total_count - success_count}/{total_count}',
+	]
 
-	if balance_changed:
-		for i, account in enumerate(accounts):
-			account_key = f'account_{i + 1}'
-			if account_key in account_check_in_details:
-				detail = account_check_in_details[account_key]
-				account_name = detail['name']
-				account_result = format_check_in_notification(detail)
-				if not any(account_name in item for item in notification_content):
-					notification_content.append(account_result)
-
-	if current_balance_hash:
-		save_balance_hash(current_balance_hash)
-
-	if need_notify and notification_content:
-		summary = [
-			'[STATS] Check-in result statistics:',
-			f'[SUCCESS] Success: {success_count}/{total_count}',
-			f'[FAIL] Failed: {total_count - success_count}/{total_count}',
-		]
-
-		if success_count == total_count:
-			summary.append('[SUCCESS] All accounts check-in successful!')
-		elif success_count > 0:
-			summary.append('[WARN] Some accounts check-in successful')
-		else:
-			summary.append('[ERROR] All accounts check-in failed')
-
-		time_info = f'[TIME] Execution time: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
-
-		notify_content = '\n\n'.join([time_info, '\n'.join(notification_content), '\n'.join(summary)])
-		screenshot_paths = take_pending_screenshots() if is_debug_enabled() else []
-		if screenshot_paths:
-			github_run_id = os.getenv('GITHUB_RUN_ID', '').strip()
-			github_repo = os.getenv('GITHUB_REPOSITORY', '').strip()
-			screenshot_hint = f'[SCREENSHOT] {len(screenshot_paths)} debug screenshot(s) saved'
-			if github_run_id and github_repo:
-				run_url = f'https://github.com/{github_repo}/actions/runs/{github_run_id}'
-				screenshot_hint += f'. Download artifact `checkin-screenshots-{github_run_id}` from: {run_url}'
-			else:
-				screenshot_hint += ' to `checkin_screenshots/`'
-			notify_content += f'\n\n{screenshot_hint}'
-
-		print(notify_content)
-		notify.push_message('AnyRouter Check-in Alert', notify_content, msg_type='text')
-		print('[NOTIFY] Notification sent due to failures or balance changes')
+	if success_count == total_count:
+		summary.append('[SUCCESS] All accounts check-in successful!')
+	elif success_count > 0:
+		summary.append('[WARN] Some accounts check-in successful')
 	else:
-		print('[INFO] All accounts successful and no balance changes detected, notification skipped')
+		summary.append('[ERROR] All accounts check-in failed')
+
+	time_info = f'[TIME] Execution time: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
+
+	notify_content = '\n\n'.join([time_info, '\n'.join(notification_content), '\n'.join(summary)])
+	screenshot_paths = take_pending_screenshots() if is_debug_enabled() else []
+	if screenshot_paths:
+		github_run_id = os.getenv('GITHUB_RUN_ID', '').strip()
+		github_repo = os.getenv('GITHUB_REPOSITORY', '').strip()
+		screenshot_hint = f'[SCREENSHOT] {len(screenshot_paths)} debug screenshot(s) saved'
+		if github_run_id and github_repo:
+			run_url = f'https://github.com/{github_repo}/actions/runs/{github_run_id}'
+			screenshot_hint += f'. Download artifact `checkin-screenshots-{github_run_id}` from: {run_url}'
+		else:
+			screenshot_hint += ' to `checkin_screenshots/`'
+		notify_content += f'\n\n{screenshot_hint}'
+
+	print(notify_content)
+	notify.push_message('AnyRouter Check-in Alert', notify_content, msg_type='text')
+	print('[NOTIFY] Full report sent for all accounts')
 
 	sys.exit(0 if success_count > 0 else 1)
 
