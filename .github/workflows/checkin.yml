@@ -22,6 +22,9 @@ jobs:
     env:
       PYTHONIOENCODING: utf-8
       PYTHONUNBUFFERED: 1
+      # runner 默认 UTC，不设这个的话通知里的 Execution time / date 都是 UTC，
+      # 和用户看到的北京时间差 8 小时。设为 Asia/Shanghai 后 datetime.now() 直接出北京时间。
+      TZ: Asia/Shanghai
       DEBUG_MODE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.debug == 'true' && 'true' || 'false' }}
     steps:
     - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
