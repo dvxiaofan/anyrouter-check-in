@@ -1,7 +1,7 @@
 name: AnyRouter 自动签到
 on:
-  schedule:
-    - cron: '0 1,5,9,13 * * *'
+  # 触发已迁移到 NAS 看门狗(workflow_dispatch), 见仓库外的 anyrouter-watchdog。
+  # 原 schedule cron 已移除: GitHub schedule 是 best-effort, 会整轮掉或延迟 1-7h。
   workflow_dispatch:
     inputs:
       debug:
@@ -120,20 +120,3 @@ jobs:
           echo "调试截图已上传为 artifact: checkin-screenshots-${{ github.run_id }}"
           ls -la checkin_screenshots/
         fi
-
-  # public 仓库若 60 天无活动，GitHub 会自动停掉 scheduled workflow 且不通知。
-  # 本仓库刻意冻结不同步上游，必然会踩到这条规则，所以每次定时运行都抢先
-  # 调 API 把自己重新 enable 一次。相比推空 commit：不污染提交历史、不需要
-  # contents:write、不引入第三方 action。
-  keepalive:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write        # 仅本 job；checkin job 仍是 contents:read
-    steps:
-    - name: 抢先重新启用本 workflow
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        gh api -X PUT "repos/${{ github.repository }}/actions/workflows/checkin.yml/enable" \
-          && echo "✅ keepalive: workflow 已确认为启用状态"
