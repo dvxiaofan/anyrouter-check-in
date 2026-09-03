@@ -34,6 +34,7 @@ from utils.browser import (
 )
 from utils.config import AccountConfig, AppConfig, load_accounts_config
 from utils.debug import debug_print, is_debug_enabled
+from utils.health import check_domain_health
 from utils.notify import notify
 from utils.proxy import get_playwright_proxy, get_proxy_server
 
@@ -470,6 +471,52 @@ async def main():
 		sys.exit(1)
 
 	print(f'[INFO] Found {len(accounts)} account configurations')
+
+	# ========== 签到前健康检查 ==========
+	# 收集所有账号用到的 provider 域名（去重）
+	domains_to_check: set[str] = set()
+	for account in accounts:
+		provider = app_config.get_provider(account.provider)
+		if provider:
+			domain = provider.domain.replace('https://', '').replace('http://', '')
+			domains_to_check.add(domain)
+
+	unreachable_domains: list[tuple[str, str]] = []
+	if domains_to_check:
+		for domain in sorted(domains_to_check):
+			is_healthy, message = check_domain_health(domain)
+			print(f'[HEALTH] {domain}: {message}')
+			if not is_healthy:
+				unreachable_domains.append((domain, message))
+
+	if unreachable_domains:
+		health_lines = [
+			'⚠️ AnyRouter 签到跳过',
+			'原因：以下网站不可达',
+		]
+		for domain, message in unreachable_domains:
+			health_lines.append(f'  • {domain}: {message}')
+		health_lines.append(f'时间：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+		health_lines.append('下次检查：6 小时后自动恢复')
+
+		# 全部域名都不可达 → 跳过整个签到
+		if len(unreachable_domains) == len(domains_to_check):
+			notify_content = '\n'.join(health_lines)
+			print(notify_content)
+			notify.push_message('AnyRouter Check-in Alert', notify_content, msg_type='text')
+			print('[NOTIFY] Health alert sent, check-in skipped')
+			sys.exit(0)
+
+		# 部分域名不可达 → 仅跳过对应 provider 的账号
+		unreachable_set = {d for d, _ in unreachable_domains}
+		accounts = [
+			account for account in accounts
+			if not (
+				(provider := app_config.get_provider(account.provider))
+				and provider.domain.replace('https://', '').replace('http://', '') in unreachable_set
+			)
+		]
+		print(f'[HEALTH] Partial outage, continuing with {len(accounts)} account(s) from reachable providers')
 
 	success_count = 0
 	total_count = len(accounts)
