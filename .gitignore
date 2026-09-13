@@ -13,3 +13,5 @@ balance_hash.txt
 checkin_screenshots
 
 .DS_Store
+usage_history.json
+usage_history.tmp

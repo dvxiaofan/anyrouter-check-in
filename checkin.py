@@ -37,6 +37,13 @@ from utils.debug import debug_print, is_debug_enabled
 from utils.health import check_domain_health
 from utils.notify import notify
 from utils.proxy import get_playwright_proxy, get_proxy_server
+from utils.usage_history import (
+	format_usage_lines,
+	load_history,
+	now_local,
+	record_and_compute,
+	save_history,
+)
 
 load_dotenv()
 
@@ -294,6 +301,7 @@ def format_check_in_notification(detail: dict) -> str:
 		'  签到后',
 		f'     余额: ${detail["after_quota"]:.2f}  |  累计消耗: ${detail["after_used"]:.2f}',
 	]
+	lines.extend(format_usage_lines(detail.get('usage')))
 
 	has_reward = detail['check_in_reward'] != 0
 	has_usage = detail['usage_increase'] != 0
@@ -510,7 +518,8 @@ async def main():
 		# 部分域名不可达 → 仅跳过对应 provider 的账号
 		unreachable_set = {d for d, _ in unreachable_domains}
 		accounts = [
-			account for account in accounts
+			account
+			for account in accounts
 			if not (
 				(provider := app_config.get_provider(account.provider))
 				and provider.domain.replace('https://', '').replace('http://', '') in unreachable_set
@@ -521,6 +530,9 @@ async def main():
 	success_count = 0
 	total_count = len(accounts)
 	notification_content = []
+	history = load_history()
+	run_time = now_local()
+	usage_totals = {'since_last': 0.0, 'day': 0.0, 'n_last': 0, 'n_day': 0}
 
 	for i, account in enumerate(accounts):
 		account_name = account.get_display_name(i)
@@ -539,7 +551,12 @@ async def main():
 				notification_content.append(account_result)
 				continue
 
-			if user_info_before and user_info_before.get('success') and user_info_after and user_info_after.get('success'):
+			if (
+				user_info_before
+				and user_info_before.get('success')
+				and user_info_after
+				and user_info_after.get('success')
+			):
 				before_quota = user_info_before['quota']
 				before_used = user_info_before['used_quota']
 				after_quota = user_info_after['quota']
@@ -552,6 +569,16 @@ async def main():
 				usage_increase = after_used - before_used
 				balance_change = after_quota - before_quota
 
+				usage = record_and_compute(
+					history, str(account.api_user or account_name), run_time, after_quota, after_used
+				)
+				if usage['since_last']:
+					usage_totals['since_last'] += usage['since_last'][0]
+					usage_totals['n_last'] += 1
+				if usage['day']:
+					usage_totals['day'] += usage['day'][0]
+					usage_totals['n_day'] += 1
+
 				detail = {
 					'name': account_name,
 					'before_quota': before_quota,
@@ -562,13 +589,12 @@ async def main():
 					'usage_increase': usage_increase,
 					'balance_change': balance_change,
 					'success': success,
+					'usage': usage,
 				}
 				notification_content.append(format_check_in_notification(detail))
 			else:
 				notification_content.append(
-					f'[CHECK-IN] {account_name}\n'
-					'  ━━━━━━━━━━━━━━━━━━━━\n'
-					'  签到成功，但余额查询失败'
+					f'[CHECK-IN] {account_name}\n  ━━━━━━━━━━━━━━━━━━━━\n  签到成功，但余额查询失败'
 				)
 
 		except Exception as e:
@@ -581,6 +607,19 @@ async def main():
 		f'[SUCCESS] Success: {success_count}/{total_count}',
 		f'[FAIL] Failed: {total_count - success_count}/{total_count}',
 	]
+
+	if usage_totals['n_last']:
+		summary.append(
+			f'[USAGE] 距上次合计消耗: ${usage_totals["since_last"]:.2f}（{usage_totals["n_last"]}/{total_count} 账号）'
+		)
+	if usage_totals['n_day']:
+		summary.append(
+			f'[USAGE] 近24h合计消耗: ${usage_totals["day"]:.2f}（{usage_totals["n_day"]}/{total_count} 账号）'
+		)
+	try:
+		save_history(history)
+	except OSError as e:
+		print(f'[WARN] usage history not saved: {e}')
 
 	if success_count == total_count:
 		summary.append('[SUCCESS] All accounts check-in successful!')

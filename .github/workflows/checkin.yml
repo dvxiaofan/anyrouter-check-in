@@ -81,6 +81,16 @@ jobs:
         restore-keys: |
           browser-profiles-${{ runner.os }}-
 
+    # 消耗记录跨 run 保存：key 带 run_id 保证每次都写新缓存，restore-keys 取最近一份。
+    # 7 天无运行会被 GitHub 清掉（现在一天 4 轮，实际不会过期）；丢了只是通知里显示 —，不影响签到。
+    - name: 恢复消耗记录
+      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25  # v5
+      with:
+        path: usage_history.json
+        key: usage-history-${{ github.run_id }}
+        restore-keys: |
+          usage-history-
+
     - name: 执行签到
       env:
         DEBUG_MODE: ${{ env.DEBUG_MODE }}
@@ -96,6 +106,13 @@ jobs:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
         xvfb-run -a --server-args="-screen 0 1920x1080x24" uv run checkin.py
+
+    - name: 保存消耗记录
+      if: always() && hashFiles('usage_history.json') != ''
+      uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25  # v5
+      with:
+        path: usage_history.json
+        key: usage-history-${{ github.run_id }}
 
     # 🔴 本仓库是 public：这个 artifact 任何人都能下载，而截图是 full_page 的
     #    「已登录 console 页」（含邮箱、用户 ID、余额，可能还有 API Key）。
