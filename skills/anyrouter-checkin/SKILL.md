@@ -156,6 +156,21 @@ Server酱 / Gotify / SMTP 邮件。未配置的会 `raise` 并在日志明确写
 `curl -x http://127.0.0.1:7893 "https://api.telegram.org/bot<TOKEN>/getUpdates"`
 从 `result[].message.chat.id` 读。
 
+## 消耗统计（2026-09-13 加）
+
+通知里每个账号多两行、末尾多两行合计：
+
+```
+  距上次消耗: $3.50（4.0h）      ← 累计消耗(used_quota) 与上一轮的差；括号是实际间隔
+  近24h消耗: $9.64（24h）        ← 与「离 24h 前最近的一条记录」的差（允许 20~30h 窗口），括号是实际跨度
+[USAGE] 距上次合计消耗 / 近24h合计消耗（n/4 账号）
+```
+
+- 用累计消耗差值而不是余额差值——余额会被签到奖励抬高
+- 显示 `—` 的情况：首次运行、缓存丢失、该账号余额查询失败、24h 窗口内没有记录。都是正常，不是故障
+- 历史存 `usage_history.json`（每账号按 api_user 保留 7 天），由 Actions cache `usage-history-<run_id>` 跨 run 传递（restore-keys 取最近一份）。`gh cache list --key usage-history` 可看。7 天无运行会被清，只影响显示
+- 代码：`utils/usage_history.py`，测试 `tests/test_usage_history.py`
+
 ## 架构要点（排查时有用）
 
 - 两段式：CloakBrowser 拿阿里云 WAF cookie（`acw_tc`/`cdn_sec_tc`/`acw_sc__v2`）
