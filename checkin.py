@@ -327,6 +327,16 @@ def format_check_in_notification(detail: dict) -> str:
 	return '\n'.join(lines)
 
 
+def format_totals_lines(totals: dict, total_count: int) -> list[str]:
+	"""合计行：账号总余额 / 累计总消耗。totals 由 main() 累加，n 是取到余额数据的账号数。"""
+	if not totals['n']:
+		return []
+	return [
+		f'[BALANCE] 账号总余额: ${totals["quota"]:.2f}（{totals["n"]}/{total_count} 账号）',
+		f'[USAGE] 累计总消耗: ${totals["used"]:.2f}（{totals["n"]}/{total_count} 账号）',
+	]
+
+
 async def check_in_account(account: AccountConfig, account_index: int, app_config: AppConfig):
 	"""为单个账号执行签到操作"""
 	account_name = account.get_display_name(account_index)
@@ -533,6 +543,7 @@ async def main():
 	history = load_history()
 	run_time = now_local()
 	usage_totals = {'since_last': 0.0, 'day': 0.0, 'n_last': 0, 'n_day': 0}
+	balance_totals = {'quota': 0.0, 'used': 0.0, 'n': 0}
 
 	for i, account in enumerate(accounts):
 		account_name = account.get_display_name(i)
@@ -579,6 +590,10 @@ async def main():
 					usage_totals['day'] += usage['day'][0]
 					usage_totals['n_day'] += 1
 
+				balance_totals['quota'] += after_quota
+				balance_totals['used'] += after_used
+				balance_totals['n'] += 1
+
 				detail = {
 					'name': account_name,
 					'before_quota': before_quota,
@@ -607,6 +622,7 @@ async def main():
 		f'[SUCCESS] Success: {success_count}/{total_count}',
 		f'[FAIL] Failed: {total_count - success_count}/{total_count}',
 	]
+	summary.extend(format_totals_lines(balance_totals, total_count))
 
 	if usage_totals['n_last']:
 		summary.append(
