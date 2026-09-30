@@ -1,6 +1,6 @@
 """账号块排版：整块信息（名字 + 签到前后 + 消耗 + 结论）夹在两条横线之间。"""
 
-from checkin import RULE_LINE, format_check_in_notification
+from checkin import RULE_LINE, format_block, format_check_in_notification
 
 
 def detail(**overrides):
@@ -52,3 +52,22 @@ def test_adjacent_blocks_are_separated_by_two_rules():
 	first = format_check_in_notification(detail()).split('\n')
 	second = format_check_in_notification(detail(name='CH')).split('\n')
 	assert [first[-1], second[0]] == [RULE_LINE, RULE_LINE]
+
+
+def test_normal_block_is_built_by_format_block():
+	lines = format_check_in_notification(detail()).split('\n')
+	assert lines[1:-1] == format_block('[CHECK-IN] ED', *lines[2:-1]).split('\n')[1:-1]
+
+
+def test_format_block_wraps_header_and_details():
+	block = format_block('[FAIL] ED', '  Failed to get user info: HTTP 401')
+	assert block.split('\n') == [
+		RULE_LINE,
+		'  [FAIL] ED',
+		'  Failed to get user info: HTTP 401',
+		RULE_LINE,
+	]
+
+
+def test_format_block_without_details_is_still_framed():
+	assert format_block('[FAIL] CH').split('\n') == [RULE_LINE, '  [FAIL] CH', RULE_LINE]

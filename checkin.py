@@ -294,11 +294,14 @@ def execute_check_in(client, account_name: str, provider_config, headers: dict):
 		return False
 
 
+def format_block(header: str, *details: str) -> str:
+	"""把账号块（标记行 + 明细行）夹在上下两条横线之间。明细行请自带缩进（一般两格）。"""
+	return '\n'.join([RULE_LINE, f'  {header}', *details, RULE_LINE])
+
+
 def format_check_in_notification(detail: dict) -> str:
 	"""格式化签到通知消息：整块账号信息（名字 + 前后数据 + 消耗 + 结论）夹在两条横线之间。"""
 	lines = [
-		RULE_LINE,
-		f'  [CHECK-IN] {detail["name"]}',
 		'  签到前',
 		f'     余额: ${detail["before_quota"]:.2f}  |  累计消耗: ${detail["before_used"]:.2f}',
 		'  签到后',
@@ -325,9 +328,7 @@ def format_check_in_notification(detail: dict) -> str:
 	if not has_reward and not has_usage:
 		lines.append('  今日已签到，无变化')
 
-	lines.append(RULE_LINE)
-
-	return '\n'.join(lines)
+	return format_block(f'[CHECK-IN] {detail["name"]}', *lines)
 
 
 def format_totals_lines(totals: dict, total_count: int) -> list[str]:
@@ -555,14 +556,14 @@ async def main():
 			if success:
 				success_count += 1
 
-			# 每个账号无条件进通知：签到失败 → [FAIL]；余额查询失败 → 明确标注
+			# 每个账号无条件进通知：签到失败 → [FAIL]；余额查询失败 → 明确标注（同样套两条横线）
 			if not success:
-				account_result = f'[FAIL] {account_name}'
+				details = []
 				if user_info_after and user_info_after.get('success'):
-					account_result += f'\n{user_info_after["display"]}'
+					details.append(f'  {user_info_after["display"]}')
 				elif user_info_after:
-					account_result += f'\n{user_info_after.get("error", "Unknown error")}'
-				notification_content.append(account_result)
+					details.append(f'  {user_info_after.get("error", "Unknown error")}')
+				notification_content.append(format_block(f'[FAIL] {account_name}', *details))
 				continue
 
 			if (
@@ -611,13 +612,11 @@ async def main():
 				}
 				notification_content.append(format_check_in_notification(detail))
 			else:
-				notification_content.append(
-					f'[CHECK-IN] {account_name}\n  ━━━━━━━━━━━━━━━━━━━━\n  签到成功，但余额查询失败'
-				)
+				notification_content.append(format_block(f'[CHECK-IN] {account_name}', '  签到成功，但余额查询失败'))
 
 		except Exception as e:
 			print(f'[FAILED] {account_name} processing exception: {e}')
-			notification_content.append(f'[FAIL] {account_name} exception: {str(e)[:50]}...')
+			notification_content.append(format_block(f'[FAIL] {account_name}', f'  exception: {str(e)[:50]}...'))
 
 	# 每次运行都发送全量通知（无论成功失败、余额查询是否成功）
 	summary = [
