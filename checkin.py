@@ -47,6 +47,9 @@ from utils.usage_history import (
 
 load_dotenv()
 
+# 通知里每个账号块的上下边框（20 个 ━），位于 checkin.py 顶部便于统一维护
+RULE_LINE = '  ━━━━━━━━━━━━━━━━━━━━'
+
 
 def parse_cookies(cookies_data):
 	"""解析 cookies 数据"""
@@ -292,10 +295,10 @@ def execute_check_in(client, account_name: str, provider_config, headers: dict):
 
 
 def format_check_in_notification(detail: dict) -> str:
-	"""格式化签到通知消息"""
+	"""格式化签到通知消息：整块账号信息（名字 + 前后数据 + 消耗 + 结论）夹在两条横线之间。"""
 	lines = [
-		f'[CHECK-IN] {detail["name"]}',
-		'  ━━━━━━━━━━━━━━━━━━━━',
+		RULE_LINE,
+		f'  [CHECK-IN] {detail["name"]}',
 		'  签到前',
 		f'     余额: ${detail["before_quota"]:.2f}  |  累计消耗: ${detail["before_used"]:.2f}',
 		'  签到后',
@@ -306,23 +309,23 @@ def format_check_in_notification(detail: dict) -> str:
 	has_reward = detail['check_in_reward'] != 0
 	has_usage = detail['usage_increase'] != 0
 
-	if has_reward or has_usage:
-		lines.append('  ━━━━━━━━━━━━━━━━━━━━')
+	if not has_reward and has_usage:
+		lines.append('  今日已签到（期间有使用）')
 
-		if not has_reward and has_usage:
-			lines.append('  今日已签到（期间有使用）')
+	if has_reward:
+		lines.append(f'  签到获得: +${detail["check_in_reward"]:.2f}')
 
-		if has_reward:
-			lines.append(f'  签到获得: +${detail["check_in_reward"]:.2f}')
+	if has_usage:
+		lines.append(f'  期间消耗: ${detail["usage_increase"]:.2f}')
 
-		if has_usage:
-			lines.append(f'  期间消耗: ${detail["usage_increase"]:.2f}')
+	if detail['balance_change'] != 0:
+		change_symbol = '+' if detail['balance_change'] > 0 else ''
+		lines.append(f'  余额变化: {change_symbol}${detail["balance_change"]:.2f}')
 
-		if detail['balance_change'] != 0:
-			change_symbol = '+' if detail['balance_change'] > 0 else ''
-			lines.append(f'  余额变化: {change_symbol}${detail["balance_change"]:.2f}')
-	else:
-		lines.extend(['  ━━━━━━━━━━━━━━━━━━━━', '  今日已签到，无变化'])
+	if not has_reward and not has_usage:
+		lines.append('  今日已签到，无变化')
+
+	lines.append(RULE_LINE)
 
 	return '\n'.join(lines)
 
