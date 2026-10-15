@@ -1,6 +1,7 @@
 ---
 name: anyrouter-checkin
 description: >
+  ⛔ 已于 2026-10-15 停用（AnyRouter 官方封号通告），不要再重启本服务；以下为停用前的历史运维文档。
   管理 AnyRouter 自动签到服务（GitHub Actions，仓库 dvxiaofan/anyrouter-check-in）。
   能力：检查各账号 session cookie 还有几天过期、新增/更新多账号配置、把本地 .env
   同步到 GitHub Environment secret、查看线上运行结果、排查签到失败。
@@ -19,6 +20,20 @@ metadata:
     requires:
       bins: ["uv", "gh", "git"]
 ---
+>
+> ⛔ **当前状态：2026-10-15 已停用，不要再重启本服务。**
+>
+> 停用原因：AnyRouter 官方通告「注意到有大量的脚本抢占/保活行为，如不及时停止，将于近期开始自动识别和封禁此类用户」。用户当天上午主动停用规避封号风险。
+>
+> 复核确认（2026-10-15，MacMini）：两处闸门均已关闭，签到链路不会再产生任何 anyrouter 请求——
+> 1. GitHub `dvxiaofan/anyrouter-check-in` 的 `checkin.yml` = `disabled_manually`（2026-10-15 09:21:35 禁用），唯一触发器只剩 `workflow_dispatch`；即使有人去调 dispatch API，GitHub 也会直接拒绝、不产生 run；
+> 2. NAS `ccfadmin` crontab 里唯一那行已**整行注释**（标记 `DISABLED-20261015-官方封号通告`，有效行 0）；`watchdog.sh` 本身只调 `api.github.com` / `api.telegram.org`，从不直接打 anyrouter。
+>
+> 最后一次真实签到：2026-10-15 09:00–09:01 北京时间，run #38663188664，success。
+>
+> **以下全部内容为停用前的历史运维文档。** 下方「停用/禁用服务」「例行体检」等章节现在只作为历史与恢复参考；恢复前必须先确认官方风控口径是否仍然生效。
+>
+> 仍在正常调用 anyrouter API 的只有 Claude Code 与 Codex CLI（都把 anyrouter 当 API 中转用），那是用额度、不是签到。
 
 # AnyRouter 自动签到运维
 
